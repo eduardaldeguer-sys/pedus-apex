@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pedus Apex — Carrera 3D Arcade</title>
+  <meta name="description" content="Juego de carreras 3D arcade en el navegador con Three.js: circuito cerrado, IA rival, derrapes, clima dinámico y modelos GLB." />
+  <!-- Tipografía racing -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- Three.js r160 como módulo ES (CDN) + addons (GLTFLoader, postprocesado, entorno).
+       Permite abrir el archivo sin servidor ni build. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- Contenedor del render WebGL (el canvas lo crea Three.js) -->
+  <div id="game-container"></div>
+
+  <!-- ================= HUD ================= -->
+  <div id="hud" class="hidden">
+    <!-- Arriba izquierda: vuelta y tiempos -->
+    <div class="hud-panel hud-topleft">
+      <div class="hud-row"><span class="hud-label">VUELTA</span><span id="hud-lap" class="hud-value">1/3</span></div>
+      <div class="hud-row"><span class="hud-label">TIEMPO</span><span id="hud-time" class="hud-value">00:00.000</span></div>
+      <div class="hud-row"><span class="hud-label">VUELTA</span><span id="hud-laptime" class="hud-value">00:00.000</span></div>
+      <div class="hud-row"><span class="hud-label">RÉCORD</span><span id="hud-best" class="hud-value">--:--.---</span></div>
+    </div>
+
+    <!-- Arriba derecha: posición + clima -->
+    <div class="hud-panel hud-topright">
+      <div id="hud-position" class="hud-position">4º</div>
+      <div class="hud-position-sub">POSICIÓN</div>
+      <div id="hud-weather" class="hud-weather" title="Clima actual (T para cambiar)">☀️ Despejado</div>
+      <button id="btn-weather" class="hud-btn" title="Cambiar clima (T)">🌦️</button>
+      <button id="btn-mute" class="hud-btn" title="Silenciar (M)">🔊</button>
+      <button id="btn-pause" class="hud-btn" title="Pausa (P)">⏸</button>
+    </div>
+
+    <!-- Abajo izquierda: minimapa -->
+    <div class="hud-panel hud-bottomleft">
+      <canvas id="minimap" width="180" height="180"></canvas>
+      <div class="minimap-legend"><span class="dot dot-player"></span> Tú &nbsp;<span class="dot dot-ai1"></span> <span class="dot dot-ai2"></span> <span class="dot dot-ai3"></span> Rivales</div>
+    </div>
+
+    <!-- Abajo derecha: velocímetro -->
+    <div class="hud-panel hud-bottomright">
+      <div class="speedo">
+        <div class="speedo-dial">
+          <div id="speedo-needle" class="speedo-needle"></div>
+          <div class="speedo-center"></div>
+        </div>
+        <div class="speedo-readout"><span id="hud-speed">0</span><span class="speedo-unit">km/h</span></div>
+        <div id="hud-gear" class="speedo-gear">N</div>
+      </div>
+    </div>
+
+    <!-- Centro: cuenta atrás / mensajes -->
+    <div id="hud-center-message" class="hud-center-message hidden"></div>
+    <div id="hud-drift" class="hud-drift hidden">¡DERAPE!</div>
+    <!-- Aviso de cambio de clima -->
+    <div id="weather-toast" class="weather-toast hidden"></div>
+  </div>
+
+  <!-- ================= MENÚ PRINCIPAL ================= -->
+  <div id="main-menu" class="overlay">
+    <div class="menu-card">
+      <h1 class="game-title">PEDUS <span>APEX</span></h1>
+      <p class="game-subtitle">Carrera arcade 3D · 3 vueltas · 4 corredores · Clima dinámico</p>
+      <div class="menu-buttons">
+        <button id="btn-play" class="btn btn-primary">▶ JUGAR</button>
+        <button id="btn-controls" class="btn btn-secondary">🎮 CONTROLES</button>
+      </div>
+      <p class="menu-hint">Pulsa <b>JUGAR</b> y escucha el rugido del motor. ¡Buena suerte en el Apex!</p>
+      <p id="menu-best" class="menu-best hidden"></p>
+      <p id="model-status" class="model-status">Cargando modelos 3D (.glb / .obj)…</p>
+    </div>
+  </div>
+
+  <!-- ================= PANEL DE CONTROLES ================= -->
+  <div id="controls-panel" class="overlay hidden">
+    <div class="menu-card">
+      <h2>CONTROLES</h2>
+      <table class="controls-table">
+        <tr><td>Acelerar</td><td><kbd>W</kbd> / <kbd>↑</kbd></td></tr>
+        <tr><td>Frenar / Marcha atrás</td><td><kbd>S</kbd> / <kbd>↓</kbd></td></tr>
+        <tr><td>Girar</td><td><kbd>A</kbd> <kbd>D</kbd> / <kbd>←</kbd> <kbd>→</kbd></td></tr>
+        <tr><td>Freno de mano (derrape)</td><td><kbd>ESPACIO</kbd></td></tr>
+        <tr><td>Reaparecer en pista</td><td><kbd>R</kbd></td></tr>
+        <tr><td>Cambiar cámara</td><td><kbd>C</kbd></td></tr>
+        <tr><td>Cambiar clima</td><td><kbd>T</kbd></td></tr>
+        <tr><td>Pausa</td><td><kbd>P</kbd></td></tr>
+        <tr><td>Silenciar</td><td><kbd>M</kbd></td></tr>
+      </table>
+      <p class="menu-hint">El clima cambia solo cada cierto tiempo: lluvia, tormenta, niebla y atardecer afectan a la adherencia y a la visibilidad.</p>
+      <div class="menu-buttons"><button id="btn-controls-back" class="btn btn-secondary">← VOLVER</button></div>
+    </div>
+  </div>
+
+  <!-- ================= PAUSA ================= -->
+  <div id="pause-menu" class="overlay hidden">
+    <div class="menu-card">
+      <h2>⏸ PAUSA</h2>
+      <div class="menu-buttons">
+        <button id="btn-resume" class="btn btn-primary">▶ CONTINUAR</button>
+        <button id="btn-restart" class="btn btn-secondary">↻ REINICIAR CARRERA</button>
+        <button id="btn-quit" class="btn btn-secondary">🏠 MENÚ PRINCIPAL</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= RESULTADOS ================= -->
+  <div id="results-menu" class="overlay hidden">
+    <div class="menu-card">
+      <h2 id="results-title">¡CARRERA TERMINADA!</h2>
+      <div id="results-position" class="results-position">1º</div>
+      <table class="controls-table results-table">
+        <tr><td>Tiempo total</td><td id="results-total">--:--.---</td></tr>
+        <tr><td>Mejor vuelta</td><td id="results-best">--:--.---</td></tr>
+        <tr><td>Récord guardado</td><td id="results-record">--:--.---</td></tr>
+      </table>
+      <div class="menu-buttons">
+        <button id="btn-retry" class="btn btn-primary">↻ REINTENTAR</button>
+        <button id="btn-results-menu" class="btn btn-secondary">🏠 MENÚ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Juego (módulo ES6+) -->
+  <script type="module" src="game.js"></script>
+</body>
+</html>
